@@ -61,4 +61,40 @@ service / on new http:Listener(9090) {
             "\"message\":\"Failed long. " + filler + "END\"}");
         return "logged json long";
     }
+
+    // Mock upstream (like the customer's ServiceNow call): returns 400 with a header whose value contains quotes.
+    resource function post backend/x() returns http:Response {
+        http:Response r = new;
+        r.statusCode = 400;
+        r.setHeader("Server-Timing", "t;desc=\"abc\", sem_wait;dur=0, sesh_wait;dur=0");
+        r.addHeader("Set-Cookie", "JSESSIONID=xxxx; Path=/; HttpOnly; Secure");
+        r.addHeader("Set-Cookie", "glide_user=; Max-Age=0; Path=/; HttpOnly");
+        r.setJsonPayload({'error: {message: "Authentication failed", detail: "Invalid deployment ID"}, status: "failure"});
+        return r;
+    }
+
+    // Calls the mock upstream, then logs the failure as a JSON line with the full error (same shape as the customer's).
+    resource function get apierror() returns string|error {
+        http:Client c = check new ("http://localhost:9090/backend");
+        json|error res = c->post("/x", {a: 1});
+        if res is error {
+            json[] frames = from var f in res.stackTrace()
+                select {callableName: f.toString()};
+            json detail = {};
+            if res is http:ApplicationResponseError {
+                var d = res.detail();
+                detail = {statusCode: d.statusCode, headers: d.headers.toJson(), body: d.body.toJson()};
+            }
+            json line = {
+                time: time:utcToString(time:utcNow()),
+                level: "ERROR",
+                module: "creagent/log_repro",
+                message: "Failed to add usage statistics.",
+                'error: {causes: [], message: res.message(), detail: detail, stackTrace: frames},
+                nodeId: "aa13e131c3b3223aaeba988ec29f19a95ab422a76c73b2207c3abbfba525b688"
+            };
+            io:println(line.toJsonString());
+        }
+        return "logged api error";
+    }
 }
