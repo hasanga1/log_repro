@@ -43,4 +43,22 @@ service / on new http:Listener(9090) {
             "\"orderId\":\"123\"}");
         return "logged json nested";
     }
+
+    // JSON log whose message has embedded newlines (message + stack trace style), no extra keys.
+    resource function get jsonmultiline() returns string {
+        io:println("{\"time\":\"" + time:utcToString(time:utcNow()) + "\", \"level\":\"ERROR\", " +
+            "\"message\":\"Failed multiline.\\nerror: something broke\\n\\tat main.bal:12\\n\\tat main.bal:30\"}");
+        return "logged json multiline";
+    }
+
+    // JSON log with a very long message (about 6000 chars), no extra keys.
+    resource function get jsonlong() returns string {
+        string filler = "";
+        foreach int i in 1...300 {
+            filler += "part" + i.toString() + "-xxxxxxxxxxxxxxxx ";
+        }
+        io:println("{\"time\":\"" + time:utcToString(time:utcNow()) + "\", \"level\":\"ERROR\", " +
+            "\"message\":\"Failed long. " + filler + "END\"}");
+        return "logged json long";
+    }
 }
