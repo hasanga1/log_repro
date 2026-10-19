@@ -1,7 +1,0 @@
-WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
-WARNING: sun.misc.Unsafe::allocateMemory has been called by io.netty.util.internal.PlatformDependent0$2 (file:/Users/hasangaranasinghe/cre-agent/cases/DITSUB-950/products/integration/custom-codes/log_repro/target/bin/log_repro.jar)
-WARNING: Please consider reporting this to the maintainers of class io.netty.util.internal.PlatformDependent0$2
-WARNING: sun.misc.Unsafe::allocateMemory will be removed in a future release
-time=2026-10-19T11:10:59.087+05:30 level=ERROR module=creagent/log_repro message="Failed to do X." error={"causes":[],"message":"something broke","detail":{"code":42,"detail":"db timeout"},"stackTrace":[{"callableName":"$get$failure","moduleName":"creagent.log_repro.0.$anonType$_1","fileName":"main.bal","lineNumber":12}]} orderId="123"
-time=2026-10-19T11:10:59.132+05:30 level=ERROR module=creagent/log_repro message="Plain error without context."
-time=2026-10-19T11:10:59.150+05:30 level=INFO module=creagent/log_repro message="Order processed." orderId="123" status="ok"

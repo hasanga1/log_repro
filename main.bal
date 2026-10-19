@@ -1,66 +1,10 @@
 import ballerina/http;
 import ballerina/io;
-import ballerina/log;
 import ballerina/time;
 
-// Repro for DITSUB-950: errors logged with key-value context.
-// Choreo's logging query returns the "message" as LogEntry and every other
-// key (error, orderId, ...) as LogContext. The console UI / export are
-// expected to show only the message.
+// Repro for DITSUB-950: Runtime Logs show logContext as {} for an HTTP-error log entry.
+// /apierror reproduces the customer's shape; /ctx* endpoints isolate which part triggers it.
 service / on new http:Listener(9090) {
-
-    // Logs an error with an error value and extra key-values.
-    resource function get failure() returns string {
-        error err = error("something broke", code = 42, detail = "db timeout");
-        log:printError("Failed to do X.", 'error = err, orderId = "123");
-        return "logged error with context";
-    }
-
-    // Control: message only, no context.
-    resource function get plain() returns string {
-        log:printError("Plain error without context.");
-        return "logged plain error";
-    }
-
-    // Info-level with context, to check non-error levels.
-    resource function get info() returns string {
-        log:printInfo("Order processed.", orderId = "123", status = "ok");
-        return "logged info with context";
-    }
-
-    // Emits a JSON log line exactly like Ballerina's json log format, with a flat key only.
-    resource function get jsonflat() returns string {
-        io:println("{\"time\":\"" + time:utcToString(time:utcNow()) + "\", \"level\":\"ERROR\", " +
-            "\"module\":\"creagent/log_repro\", \"message\":\"Failed JSON flat.\", \"orderId\":\"123\"}");
-        return "logged json flat";
-    }
-
-    // Emits a JSON log line with a nested error object under "error".
-    resource function get jsonnested() returns string {
-        io:println("{\"time\":\"" + time:utcToString(time:utcNow()) + "\", \"level\":\"ERROR\", " +
-            "\"module\":\"creagent/log_repro\", \"message\":\"Failed JSON nested.\", " +
-            "\"error\":{\"causes\":[], \"message\":\"something broke\", \"detail\":{\"code\":42}}, " +
-            "\"orderId\":\"123\"}");
-        return "logged json nested";
-    }
-
-    // JSON log whose message has embedded newlines (message + stack trace style), no extra keys.
-    resource function get jsonmultiline() returns string {
-        io:println("{\"time\":\"" + time:utcToString(time:utcNow()) + "\", \"level\":\"ERROR\", " +
-            "\"message\":\"Failed multiline.\\nerror: something broke\\n\\tat main.bal:12\\n\\tat main.bal:30\"}");
-        return "logged json multiline";
-    }
-
-    // JSON log with a very long message (about 6000 chars), no extra keys.
-    resource function get jsonlong() returns string {
-        string filler = "";
-        foreach int i in 1...300 {
-            filler += "part" + i.toString() + "-xxxxxxxxxxxxxxxx ";
-        }
-        io:println("{\"time\":\"" + time:utcToString(time:utcNow()) + "\", \"level\":\"ERROR\", " +
-            "\"message\":\"Failed long. " + filler + "END\"}");
-        return "logged json long";
-    }
 
     // Mock upstream (like the customer's ServiceNow call): returns 400 with a header whose value contains quotes.
     resource function post backend/x() returns http:Response {
@@ -97,4 +41,53 @@ service / on new http:Listener(9090) {
         }
         return "logged api error";
     }
+
+    // ---- Bisect endpoints: each logs one JSON line whose context isolates one candidate trigger ----
+
+    // A: only a header value containing quotes
+    resource function get ctxquotes() returns string {
+        emit("Bisect A quotes", {'error: {message: "x", detail: {headers: {"server-timing": ["t;desc=\"abc\", sem_wait;dur=0"]}}}});
+        return "A";
+    }
+
+    // B: headers and cookies with ; = / characters, but no quotes
+    resource function get ctxheaders() returns string {
+        emit("Bisect B headers", {'error: {message: "x", detail: {headers: {
+            "set-cookie": ["JSESSIONID=xxxx; Path=/; HttpOnly; Secure", "glide_user=; Max-Age=0; Path=/; HttpOnly"],
+            "content-type": ["application/json;charset=UTF-8"], "cache-control": ["no-cache,no-store,max-age=-1"]}}}});
+        return "B";
+    }
+
+    // C: stackTrace as an array of objects
+    resource function get ctxstack() returns string {
+        emit("Bisect C stack", {'error: {message: "x", stackTrace: [
+            {callableName: "a", moduleName: "m", fileName: "f.bal", lineNumber: 1},
+            {callableName: "b", moduleName: "m", fileName: "f.bal", lineNumber: 2}]}});
+        return "C";
+    }
+
+    // D: large flat context (about 6 KB), nothing special in it
+    resource function get ctxlarge() returns string {
+        string filler = "";
+        foreach int i in 1...300 {
+            filler += "part" + i.toString() + "-xxxxxxxxxxxxxxxx ";
+        }
+        emit("Bisect D large", {detail: filler});
+        return "D";
+    }
+
+    // E: nested body object with a message and detail, no headers
+    resource function get ctxbody() returns string {
+        emit("Bisect E body", {'error: {message: "Bad Request", detail: {statusCode: 400,
+            body: {'error: {message: "Authentication failed", detail: "Invalid deployment ID"}, status: "failure"}}}});
+        return "E";
+    }
+}
+
+isolated function emit(string message, map<json> context) {
+    map<json> line = {time: time:utcToString(time:utcNow()), level: "ERROR", module: "creagent/log_repro", message: message};
+    foreach var [k, v] in context.entries() {
+        line[k] = v;
+    }
+    io:println(line.toJsonString());
 }
